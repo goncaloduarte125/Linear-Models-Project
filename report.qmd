@@ -1,0 +1,225 @@
+---
+title: Bridge condition prediction
+subtitle: An exploration in Linear Models
+author: ["Gonçalo Duarte", "Joana Ferreira", "Lucas Pegas"]
+date: today
+lang: en-US
+strip-comments: true
+df-print: paged
+  
+format:
+  html:
+    theme: cosmo
+    toc: true
+    embed-resources: true
+    code-tools:
+      toggle: false
+      source: project_template.qmd
+    code-overflow: wrap
+    highlight-style: arrow
+    smooth-scroll: true
+    lightbox: true
+    number-sections: true
+    tbl-cap-location: top
+    other-links:
+      - text: Kaggle competition
+        href: https://www.kaggle.com/competitions/parking-garage-occupancy
+---
+
+```{css}
+#| echo: FALSE
+body {
+  hyphens: auto;
+  text-align: justify;
+}
+```
+
+```{r}
+#| context: setup
+#| echo: FALSE
+
+# Load packages and set any options here
+
+library(ggplot2)
+theme_set(theme_linedraw(base_size = 12))
+```
+<!-- Definitions for TeX mathematical expressions -->
+:::{style="display:none"}
+$\def\bs#1{\boldsymbol{#1}}
+\def\b#1{\mathbf{#1}}}$
+:::
+
+# Introduction
+
+$$\b{y} \sim N_n \left(\b{X} \bs{\beta}, \sigma^2\b{I}\right)$$
+
+For this project we'll evaluate a dataset extracted from the US National Bridge Inspection maintained by the Federal Highways Agency, part of the US Department of Transportation.
+
+Our goals is to analyse how the covariates can explain the bridge condition and propose one or more linear rgression models to predict the response variable for the `predict.csv` dataset.
+
+## Data Set Overview
+
+| Variable | Description |
+|----------|-------------|
+| Structure_id | Identification key |
+| [Urban]{style="color: #7030A0;"} | Whether the bridge is in an urban or rural area |
+| [Year]{style="color: #7030A0;"} | The year the bridge was built |
+| [Lanes_on]{style="color: #7030A0;"} | Number of traffic lanes on the bridge |
+| [AverageDaily]{style="color: #7030A0;"} | The average daily traffic (number of vehicles) |
+| [Historic]{style="color: #7030A0;"} | Whether the bridge is historic |
+| [Material]{style="color: #7030A0;"} | The dominant material the bridge is made from |
+| [Spans]{style="color: #7030A0;"} | Number of spans of the bridge |
+| [Length]{style="color: #7030A0;"} | The length of the bridge (m) |
+| [Width]{style="color: #7030A0;"} | The width of the bridge (m) |
+| [Trucks_percent]{style="color: #7030A0;"} | The percentage of traffic made up of trucks |
+
+# Exploratory data analysis
+
+Here's the summary of the dataset.
+```{r}
+#| label: data summary
+#| fig-cap: Simple summary
+group_03 <- read.csv("group_03.csv")
+
+summary(group_03)
+```
+
+### Response variable
+
+Now lets take a look at the response variable to understand how it is distributed.
+
+```{r}
+#| label: Condition distribution
+#| fig-cap: Response variable distribution
+# Basic histogram with normal curve overlay
+freq_table <- table(group_03$Condition)
+prob_table <- prop.table(freq_table)
+
+# Barplot with normal overlay
+barplot(prob_table, 
+        main = "Distribution of Condition",
+        xlab = "Condition",
+        ylab = "Probability",
+        col = "lightblue",
+        border = "black")
+
+# Add normal curve overlay
+x_vals <- as.numeric(names(prob_table))
+curve(dnorm(x, mean = mean(group_03$Condition), 
+            sd = sd(group_03$Condition)), 
+      col = "red", 
+      lwd = 2, 
+      add = TRUE)
+
+legend("topleft", 
+       legend = c("Normal distribution", "Observed frequencies"),
+       col = c("red", "lightblue"), 
+       lwd = 2,
+       pch = c(NA, 15))
+```
+
+The `Condition` variable is a numerical measure of the bridge's condition, derived from the ratings attributed to the bridge dec, superstructure and foundations in the most recent inspection. The minimum value observed is 0 and the maximum obtained was 27. 
+The response variable is approximately symmetric, with its probability density centered around 20 and exhibiting close to a normal distribution, with slightly heavier tails. 
+
+```{r}
+#| label: Condition Skewness
+#| fig-cap: Response variable  skewness
+
+library(moments); 
+skewness(group_03$Condition)
+```
+
+A skewness value of -0.78 confirms mild negative skewness, meaning the response distribution is moderately skewed towards the left. The deviation is not significant and as such the response variable should be compatible with linear with linear regression as long as residuals are well-behaved.
+
+### Pairwise correlation
+
+Now we'll go over the correlations with the response variable for all the numerical variables.
+
+```{r}
+#| label: Pairwise correlation
+#| fig-cap: Pairwise correlation with the response variable.
+
+library(corrplot)
+cor_matrix <- cor(group_03[, sapply(group_03, is.numeric)])
+
+corrplot(cor_matrix, method = "color", type = "lower", 
+         addCoef.col = "black", number.cex = 0.8,
+         tl.col = "black", tl.srt = 45, tl.cex = 0.9,
+         col = colorRampPalette(c("blue", "white", "red"))(200),
+         diag = FALSE)
+```
+
+Looking at the correlations with the response variable, `Condition`, we can see that the bridge's `Year` has a significant positive correlation with its condition, indicating older bridges are in a worse condition. We can also see that variables  `Width` and `Lanes_on` are positively correlated which makes sense as more lanes require more width. The average daily traffic is also positively correlated with the bridge width and number of lanes. Apart from this relation we can also see a negative correlation between the `Year` and `Trucks_percent` meaning that older bridges tend to have more truck traffic. This also seems plausible as newer bridges might be built in areas with more commuter trafic. 
+
+### Categorical variables
+
+```{r}
+#| label: Categorical variables
+#| fig-cap: Categorical variables 
+
+
+library(ggplot2)
+
+# For Urban
+ggplot(group_03, aes(x = Urban, y = Condition)) +
+  geom_boxplot(fill = "steelblue") +
+  labs(title = "Condition by Location", x = "Urban/Rural", y = "Condition")
+
+
+# For Historic
+ggplot(group_03, aes(x = factor(Historic), y = Condition)) +
+  geom_boxplot(fill = "coral") +
+  labs(title = "Condition by Historic Status", 
+       x = "Historic", y = "Condition")
+
+# For Material
+ggplot(group_03, aes(x = factor(Material), y = Condition)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(title = "Condition by Material", x = "Material", y = "Condition") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Looking at the `Urban` covariate we can see that both groups have similar medians altough the median condition of urban bridges is slightly higher. Rural bridges show substantially more variability, with more bridges in worse condition.
+
+When it comes to Historic Status we can see that Unknown shows the higher median, altough is the least common category. The `Not Historic`category also shows a high condition score with less variance than the bridges marked as `Possible`. The bridges registered as historic show the lowest median condition score with some highly degraded bridges. These scores indicate that historical status might be an informative categorical predictor.
+
+The `Condition by Material Plot` shows a similar pattern. All the materials have a median condition measure close to 20 with Concrete and "Other" displaying a slightly higher median and Steel and Timber slightly below Timber. 
+
+Concrete and Steel show more variability which makes sense as they're the more used materials by a significant margin.
+
+
+## The specification of linear models
+
+In `R`, models are specified in a compact symbolic form. From the documentation:
+
+Define the following models:
+
+a. a first-order model with all covariates except `SEX`;
+
+
+```{r}
+#| label: tbl-basic
+#| tbl-cap: Simple demo R table 
+
+dataset <- data.frame(x = 1:10, y = 1:10 + rnorm(10))
+dataset
+```
+
+
+```{r}
+#| label: fig-basic
+#| fig-cap: Simple demo R plot 
+
+ggplot(dataset) + geom_point(aes(x, y), col = "tomato")
+```
+
+See [@fig-basic] for an illustration.
+
+
+# Methods
+
+# Results
+
+# Conclusion
+
+# Appendix I {.unnumbered}
