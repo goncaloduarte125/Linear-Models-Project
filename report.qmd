@@ -190,6 +190,29 @@ Concrete and Steel show more variability which makes sense as they're the more u
 
 ## The specification of linear models
 
+Lets start by defining the most basic implementation of the model, that is, including all the covariates while excluding the structure_id.
+
+```{r}
+#| label: first model
+
+model <- lm(Condition ~ . - Structure_id, data = group_03)
+summary(model)
+```
+
+Now lets examine the residuals.
+
+```{r}
+#| label: residuals plot for the first model
+
+ggplot(data.frame(fitted = fitted(model), residuals = residuals(model)), 
+       aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  labs(x = "Fitted Values", y = "Residuals", title = "Residuals vs Fitted")
+
+```
+
 In `R`, models are specified in a compact symbolic form. From the documentation:
 
 Define the following models:
