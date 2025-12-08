@@ -81,6 +81,11 @@ Here's the summary of the dataset.
 #| fig-cap: Simple summary
 group_03 <- read.csv("group_03.csv")
 
+
+group_03$Urban <- as.factor(group_03$Urban)
+group_03$Historic <- as.factor(group_03$Historic)
+group_03$Material <- as.factor(group_03$Material)
+
 summary(group_03)
 ```
 
@@ -130,6 +135,30 @@ skewness(group_03$Condition)
 ```
 
 A skewness value of -0.78 confirms mild negative skewness, meaning the response distribution is moderately skewed towards the left. The deviation is not significant and as such the response variable should be compatible with linear with linear regression as long as residuals are well-behaved.
+
+### Numerical variables
+
+Here we inspect the relationship between the numerical covariates and the bridge condition.
+
+```{r}
+#| label: Numerical variables scatterplots
+#| fig-cap: Numerical variables vs Condition
+
+
+db_num <- group_03 |> 
+  select(Year, Lanes_on, AverageDaily, Spans, Length, Width, Trucks_percent, Condition)
+
+# Criar scatterplots
+db_num |>
+  pivot_longer(-Condition, names_to = "Covariate", values_to = "Value") |>
+  ggplot(aes(x = Value, y = Condition)) +
+  geom_point(alpha = 0.5, size = 1) +
+  facet_wrap(~ Covariate, scales = "free_x") +
+  theme_linedraw() +
+  labs(y = "Condition (Y)", x = "Value")
+```
+
+From the scatter plots analysis, we can interpret the relationship between each numerical covariate and the bridge condition. Surprisingly, traffic and usage variables like `AverageDaily` and `Trucks_percent` do not show a strong correlation with the condition, suggesting that traffic volume alone is not a strong predictor. Similarly, physical dimensions such as `Lanes_on` and `Width` display no clear linear relationship, with data appearing heavily clustered. While `Length` and `Spans` exhibit a very weak downward trend, hinting that larger structures might be slightly associated with lower conditions, the pattern is inconclusive. In contrast, the `Year` variable presents the clearest relationship in the entire set, revealing a distinct positive trend where newer bridges tend to have higher condition scores, whereas older bridges (particularly pre-1950) display more low-condition outliers. Therefore, visual inspection strongly suggests that `Year` is the best single candidate for our initial linear model, being the only variable with a distinct linear trend against the response variable.
 
 ### Pairwise correlation
 
@@ -187,6 +216,22 @@ The `Condition by Material Plot` shows a similar pattern. All the materials have
 
 Concrete and Steel show more variability which makes sense as they're the more used materials by a significant margin.
 
+### Multivariate Analysis
+
+Finally, let's combine our findings. We know `Year` is the strongest numerical predictor and `Material` showed differences in the boxplots. This plot visualizes how they interact.
+
+```{r}
+#| label: Year vs Condition by Material
+#| fig-cap: Evolution of Bridge Condition over Time colored by Material
+
+ggplot(group_03, aes(x = Year, y = Condition, color = Material)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Evolution of Bridge Condition over Time",
+       subtitle = "Colored by Bridge Material",
+       y = "Condition", x = "Year Built") +
+  theme_linedraw()
+```
+This multivariate visualization reveals a clear interaction between bridge age and material type, confirming that while `Year` is the primary driver of condition—with newer bridges consistently achieving higher ratings—`Material` plays a crucial role in this dynamic. Specifically, post-1980 bridges are predominantly `Concrete` and cluster tightly in the high-condition range (18–25), demonstrating the resilience of modern construction. In contrast, older structures (pre-1950) show significantly more variability: `Timber` bridges, though rare, appear as the most deteriorated category, often falling below a rating of 10, while `Steel` bridges show a wider spread with clear signs of aging. Interestingly, `Masonry` bridges maintain surprisingly decent conditions despite their age, reflecting the natural durability of stone. This analysis suggests that the network's high-condition inventory is driven by modern concrete structures, while low-condition outliers are primarily older steel and timber bridges, reinforcing `Year` as the strongest predictor for our linear model as it proxies for both age and material technology evolution.
 
 ## The specification of linear models
 
