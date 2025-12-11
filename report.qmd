@@ -143,8 +143,9 @@ Here we inspect the relationship between the numerical covariates and the bridge
 ```{r}
 #| label: Numerical variables scatterplots
 #| fig-cap: Numerical variables vs Condition
-
-
+library(dplyr)
+library(tidyr)
+library(ggplot2)
 db_num <- group_03 |> 
   select(Year, Lanes_on, AverageDaily, Spans, Length, Width, Trucks_percent, Condition)
 
@@ -258,7 +259,62 @@ ggplot(data.frame(fitted = fitted(model), residuals = residuals(model)),
 
 ```
 
+
+```{r}
+par(mfrow=c(2,2))
+plot(model)
+
+```
+
+```{r}
+par(mfrow=c(1,2))
+
+res <- rstudent(model)
+hist(res)
+boxplot(res)
+```
+
+The histogram of the residuals presents a normal shape with slight negative skewness, which is confirmed by the Q-Q plot, where we only see deviation in the lower values. (Box plot ??? Scale-Location??) The Residuals vs Leverage plot show no observation close to the Cook's Distance at the 0.5 level, which indicate that the outliers are not significant.
+
+**Homocedasticity**
+
+Using the Breusch-Pagan test:
+
+```{r}
+lmtest::bptest(model)
+```
+
+The homocedasticity null hypothesis is rejected, and so, the residuals may be correlated with the covariates.
+
+```{r}
+par(mfrow=c(2,2))
+
+vars <- names(group_03)
+vars <- vars[!(vars %in% c("Structure_id", "Condition"))]
+
+for(v in vars) plot(group_03[, v], res, xlab = v)
+```
+
+After observing the residuals vs covariates plots we can conclude the following:since the box-plot for Rural and Urban have the same distribution, this suggests that this covariate is insignificant to our model, which is also supported by the p-value (0.40) shown in the model summary; the plot of residuals vs Year show a slight curve towards recent years, which supports the slight upwards curvature presented in the Residuals vs Fitted plot, which may be the source of our linearity problems; both Historic and Material plots have similarly shaped box-plots; the remaining plots present all a slight funnel shape, which once again indicates heterocedasticity, as variance shrinks as covariate values grow.
+
+```{r}
+ppcc::ppccTest(rstudent(model), qfn = "qnorm") # Filliben test
+```
 In `R`, models are specified in a compact symbolic form. From the documentation:
+
+## Model improvements
+
+Building up on the box-plot analysis for the Urban covariate we'll evaluate wether removing that covariate improves model performance.
+
+```{r}
+
+reduced_model <- lm(Condition ~ . - Structure_id - Urban, data = group_03)
+
+anova(reduced_model, model)
+
+```
+
+From these results we conclude that adding `URBAN` doesn't increase the explanatory power of the model so we'll use the reduced model as it is more parsimonious without sacrificing predictive ability.
 
 Define the following models:
 
