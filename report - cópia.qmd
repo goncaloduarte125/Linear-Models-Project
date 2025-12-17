@@ -148,8 +148,9 @@ Here we inspect the relationship between the numerical covariates and the bridge
 #| label: Numerical variables scatterplots
 #| fig-cap: Numerical variables vs Condition
 
+
 db_num <- group_03 |> 
-  select(Year, Lanes_on, AverageDaily, Spans, Length, Width, Trucks_percent, Condition)
+  dplyr::select(Year, Lanes_on, AverageDaily, Spans, Length, Width, Trucks_percent, Condition)
 
 # scatterplots
 db_num |>
@@ -284,7 +285,7 @@ boxplot(res)
 
 The histogram of the residuals presents a normal shape with slight negative skewness, which is confirmed by the Q-Q plot, where we only see deviation in the lower values. (Box plot ??? Scale-Location??) The Residuals vs Leverage plot show no observation close to the Cook's Distance at the 0.5 level, which indicate that the outliers are not significant.
 
-##Multicollinearity (VIF) test
+## Multicollinearity (VIF) test
 
 ```{r}
 library(car)
@@ -331,7 +332,7 @@ lambda <- bc$x[which.max(bc$y)]
 print(paste("Best Lambda:", round(lambda, 2)))
 
 ```
-To address the severe heteroscedasticity detected in the residual analysis, we performed a Box-Cox transformation to identify an appropriate power transformation for the response variable. The resulting profile log-likelihood plot indicated an optimal $\lambda$ value of approximately 2, which suggests that a quadratic transformation is necessary to stabilize the variance. Consequently, we will proceed by defining a new model using the square of the bridge condition ($Y^2$) as the response variable to improve adherence to the linear regression assumptions.
+Since the response variable Condition contains zero values and the Box-Cox transformation involves logarithmic operations (which are undefined for zero), a small constant shift parameter of $0.1$ was added to the response ($Y + 0.1$). To address the severe heteroscedasticity detected in the residual analysis, we performed a Box-Cox transformation to identify an appropriate power transformation for the response variable. The resulting profile log-likelihood plot indicated an optimal $\lambda$ value of approximately 2, which suggests that a quadratic transformation is necessary to stabilize the variance. Consequently, we will proceed by defining a new model using the square of the bridge condition ($Y^2$) as the response variable to improve adherence to the linear regression assumptions.
 
 ## Transformed Model
 
@@ -399,7 +400,10 @@ ppcc::ppccTest(rstudent(model1), qfn = "qnorm") # Filliben test
 ```
 In `R`, models are specified in a compact symbolic form. From the documentation:
 
-## Automatic Model Selection
+### Automatic model search:
+
+###Best subsets
+### Automatic Model Selection (Stepwise regression)
 
 ```{r}
 #| label: stepwise_selection
@@ -443,6 +447,44 @@ print(paste("RMSE:", round(rmse_score, 4)))
 
 To assess the model's generalization capability, we evaluated its performance on the held-out test set (20% of the data), achieving a Root Mean Squared Error (RMSE) of 1.4595. This result demonstrates strong predictive accuracy relative to the Condition scale (0–27) and confirms that the quadratic model with interactions captures the underlying structural patterns without overfitting. Consequently, this validated model was applied to the unlabelled predict.csv dataset, reversing the Box-Cox transformation to generate the final predictions presented below.
 
+
+##LASSO
+
+```{r}
+#| label: lasso_model
+
+library(glmnet)
+
+set.seed(3185)
+X_train <- model.matrix(I((Condition + 0.1)^2) ~ . - Structure_id + Year:Material, data = db_train)[, -1]
+Y_train <- (db_train$Condition + 0.1)^2
+
+X_test <- model.matrix(Condition ~ . - Structure_id + Year:Material, data = db_test)[, -1]
+
+cv_lasso <- cv.glmnet(X_train, Y_train, alpha = 1)
+
+
+plot(cv_lasso)
+
+```
+
+```{r}
+best_lambda <- cv_lasso$lambda.1se
+
+print(paste("Best Lambda:", best_lambda))
+```
+
+```{r}
+pred_lasso_sq <- predict(cv_lasso, newx = X_test, s = best_lambda)
+pred_lasso_real <- sqrt(pmax(0, pred_lasso_sq)) - 0.1
+
+
+rmse_lasso <- sqrt(mean((db_test$Condition - pred_lasso_real)^2))
+
+print(paste("RMSPE Stepwise:", round(rmse_score, 4)))
+print(paste("RMSPE LASSO:", round(rmse_lasso, 4)))
+```
+
 #Results
 
 ```{r}
@@ -461,21 +503,6 @@ predictions <- data.frame(
 
 head(predictions)
 ```
-
-
-## Model improvements- #### acho que já não se aplica para os dados com a seed
-
-Building up on the box-plot analysis for the Urban covariate we'll evaluate wether removing that covariate improves model performance.
-
-```{r}
-
-reduced_model <- lm(Condition ~ . - Structure_id - Urban, data = group_03)
-
-anova(reduced_model, model1)
-
-```
-
-From these results we conclude that adding `URBAN` doesn't increase the explanatory power of the model so we'll use the reduced model as it is more parsimonious without sacrificing predictive ability.
 
 
 
