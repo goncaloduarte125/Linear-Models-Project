@@ -504,6 +504,17 @@ predictions <- data.frame(
 head(predictions)
 ```
 
+# Model evaluation
+
+Even after the model transformation, our diagnostics showed that the variance structure is incompatible with Gaussian assumptions. There are significant departures from normality in the Q-Q residuals test, suggesting the Gaussian error assumption is inappropriate. The Breutsch-Pagan test strongly rejects constant variance even after transformation of the response. In contrast, the Residuals vs Fitted plot indicates that the mean structure is broadly adequate, implying that the primary source of misspecification lies in the variance model rather than the linear predictor. Given the evident mean–variance dependence and the discrete, non-Gaussian nature of the response, a generalized linear model with an appropriate variance function is therefore more suitable than a homoskedastic Gaussian linear model.
+
+# Poisson Model
+
+
+Since the response variable is discrete, we opted to introduce a Poisson model and consider it for this dataset. We chose Poisson over Negative binomial as the response variable's variance is smaller than the mean so we aren't dealing with overdispersion, in fact our evaluations reveal underdispersion.
+
+
+
 
 
 
