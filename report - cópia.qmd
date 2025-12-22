@@ -254,7 +254,10 @@ model1 <- lm(Condition ~ . - Structure_id + Year:Material, data = db_train)
 summary(model1)
 ```
 
-Now lets examine the residuals.
+From the summary we can see that model explains approximately 46.7% of the variance in bridge conditions (Adjusted R-squared = 0.467), with a residual standard error of 1.47 rating points. Overall, this first model is highly significant (p < 2.2e-16) even though it doesn't account for most of the variance.
+
+We can also see that bridge conditions deteriorate over time as older buildings have worse condition scores altough this effect varies by material with steel bridges having the clearer pattern of deterioration as they get older. Additionally, longer and wider bridges tend to have slightly better conditions, while bridges with more spans show slightly worse conditions. 
+
 
 ```{r}
 #| label: residuals plot for the first model
@@ -412,8 +415,6 @@ library(leaps)
 best <- regsubsets(I((Condition + 0.1)^2) ~ . - Structure_id + Year:Material , data = db_train, really.big = TRUE, nbest = 1,
                    nvmax = 8)
 info <- summary(best)
-plot(2:9, info$cp, xlab = 'P (# of predictors + 1)', ylab = 'Cp')
-abline(a = 0, b = 1, col = "blue")
 
 res <- data.frame(P = 2:9,
                   adjR2 = info$adjr2,
@@ -430,15 +431,20 @@ columns[columns == TRUE]
 mod_best <- lm(I((Condition + 0.1)^2) ~Year+Spans+Material+Historic+Year:Material,data = db_train)
 
 summary (mod_best)
-print(paste("R2 transformed model:", summary(mod_transf)$adj.r.squared))
-print(paste("R2 best subsets transformed model:", summary(mod_best)$adj.r.squared))
+print(paste("R-squared transformed model:", summary(mod_transf)$adj.r.squared))
+print(paste("R-squared best subsets transformed model:", summary(mod_best)$adj.r.squared))
 ```
+
+The best-subsets transformed model explains approximately 48.4% of the variance and displays some of the same patterns in terms of how the covariates influence the score, namely `year` and ` material`. Overall, it highly significant (p < 2.2e-16).
+Having said that it doesn't represent an improvement over the transformed model as there's a slight decrease in R-squared.
 
 ```{r}
 #| label: anova_check best subsets
 
 anova(mod_best, mod_transf)
 ```
+
+From the p-value of this ANOVA test we gather that the additional predictors in the transformed model provide an improvement over the best subsets model. This is also validated by the better RMSE score we obtained from the original transformed model we can see below.
 
 ```{r}
 #| label: test_predictions best subsets
@@ -454,7 +460,6 @@ rmse_score <- sqrt(mean((actuals - pred_best_subsets_real)^2))
 print(paste("RMSE Best subsets:", round(rmse_score, 4)))
 ```
 
-
 ### Automatic Model Selection (Stepwise regression)
 
 ```{r}
@@ -463,7 +468,10 @@ print(paste("RMSE Best subsets:", round(rmse_score, 4)))
 mod_step <- step(mod_transf, direction = "both", trace = 0)
 summary(mod_step)
 ```
-## falta fazer a análise do mod_step :os graficos para analisar residuos
+
+The model obtained from a Stepwise regression over the transformed model shows a modest improvement over the best subsets model in terms of R-squared, explaining 48.5% of the variance. It is also quite significant overall and displays similar patterns to previous models in terms of covariate interactions and their influence on the scores.
+
+
 
 ```{r}
 print(paste("R2 transformed model:", summary(mod_transf)$adj.r.squared))
@@ -712,7 +720,7 @@ print(paste("RMSE LASSO Poisson:", round(rmse_lasso_poi, 4)))
 
 ```
 
-# Comparation 
+# Comparison 
 
 ```{r}
 #| label: poisson_results_table
