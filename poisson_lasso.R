@@ -3,7 +3,7 @@ library(ggplot2)
 library(dplyr)
 library(MASS)
 library(glmnet)
-
+library(glmmTMB)
 # Set seed for reproducibility
 set.seed(3185)
 
@@ -36,6 +36,13 @@ cat("Test set size:", nrow(test_data), "\n")
 
 # Regular Poisson GLM
 model_poisson <- glm(Condition ~ ., family = poisson, data = train_data)
+
+# COM-Poisson Model
+predictors <- setdiff(names(train_data), "Condition")
+formula_comp <- as.formula(paste("Condition ~", paste(predictors, collapse = " + ")))
+model_comp <- glmmTMB(formula_comp ,
+                  data = train_data,
+                  family = compois)
 
 # Transformed Linear Model
 mod_transf <- lm(I((Condition + 0.1)^2) ~ . + Year:Material, data = train_data)
@@ -104,6 +111,14 @@ rmse_train_poisson <- sqrt(mean((train_data$Condition - pred_train_poisson)^2))
 pred_test_poisson <- predict(model_poisson, newdata = test_data, type = "response")
 rmse_test_poisson <- sqrt(mean((test_data$Condition - pred_test_poisson)^2))
 
+# COM-Poisson - Training
+pred_train_comp <- predict(model_comp, newdata = train_data)
+rmse_train_comp <- sqrt(mean((train_data$Condition - pred_train_comp)^2))
+
+# COM-Poisson - Test
+pred_test_comp <- predict(model_comp, newdata = test_data)
+rmse_test_comp <- sqrt(mean((test_data$Condition - pred_test_comp)^2))
+
 # LASSO Poisson - Training
 pred_train_lasso <- predict(model_lasso_poisson, newx = X_train, type = "response")
 rmse_train_lasso <- sqrt(mean((y_train - pred_train_lasso)^2))
@@ -132,13 +147,24 @@ rmse_test_transf <- sqrt(mean((test_data$Condition - pred_test_transf)^2))
 
 
 comparison <- data.frame(
-  Model = c("Poisson", "LASSO Poisson", "RIDGE Poisson", "Transformed LM"),
-  Train_RMSE = c(rmse_train_poisson, rmse_train_lasso, rmse_train_ridge, rmse_train_transf),
-  Test_RMSE = c(rmse_test_poisson, rmse_test_lasso, rmse_test_ridge, rmse_test_transf),
-  Difference = c(rmse_test_poisson - rmse_train_poisson, 
+  Model = c("Poisson", "COM-Poisson", "LASSO Poisson", "RIDGE Poisson", "Transformed LM"),
+  Train_RMSE = c(rmse_train_poisson, rmse_train_comp, rmse_train_lasso, 
+                 rmse_train_ridge, rmse_train_transf),
+  Test_RMSE = c(rmse_test_poisson, rmse_test_comp, rmse_test_lasso, 
+                rmse_test_ridge, rmse_test_transf),
+  Difference = c(rmse_test_poisson - rmse_train_poisson,
+                 rmse_test_comp - rmse_train_comp,
                  rmse_test_lasso - rmse_train_lasso,
                  rmse_test_ridge - rmse_train_ridge,
                  rmse_test_transf - rmse_train_transf)
 )
 
 print(comparison)
+
+# Check the dispersion parameter (nu) from COM-Poisson
+cat("\n=== COM-Poisson Dispersion Parameter ===\n")
+cat("Nu (dispersion):", coef(model_comp)["nu"], "\n")
+cat("Interpretation:\n")
+cat("  nu = 1: Poisson distribution\n")
+cat("  nu > 1: Underdispersion (variance < mean)\n")
+cat("  nu < 1: Overdispersion (variance > mean)\n")

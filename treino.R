@@ -54,6 +54,3 @@ actuals <- db_test$Condition
 rmse_poi <- sqrt(mean((actuals - pred_poi_test)^2))
 
 print(paste("RMSE Poisson:", round(rmse_poi, 4)))
-
-
-

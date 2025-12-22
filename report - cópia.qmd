@@ -402,7 +402,7 @@ In `R`, models are specified in a compact symbolic form. From the documentation:
 
 ### Automatic model search:
 
-###Best subsets
+### Best subsets
 
 
 ### Automatic Model Selection (Stepwise regression)
@@ -539,7 +539,6 @@ In Poisson models we would expect to see a dispersion ratio close to one as oppo
 ```{r}
 #| label: Poisson Model Goodness fit
 
-# Residual deviance test
 pchisq(model_poisson$deviance, model_poisson$df.residual, lower.tail = FALSE)
 ```
 
@@ -590,6 +589,44 @@ rmse_step_poi <- sqrt(mean((test_poi$Condition - pred_step_poi)^2))
 print(paste("RMSE Poisson Stepwise:", round(rmse_step_poi, 4)))
 
 ```
+
+### Automatic Model Selection (Best subsets)
+
+For the best subsets regression on the Poisson model we'll use `dredge` from the `MuMin` package which works with GLMs as well as opposed to `regsubsets()` which is restricted to linear regressions. 
+
+```{r}
+library(MuMIn)
+options(na.action = "na.fail")
+
+global <- glm(
+  Condition ~ . + Year:Material,   
+  family = poisson,
+  data = train_poi
+)
+
+dd <- dredge(global, fixed = "Year:Material", rank = "AIC")
+
+best_fit <- get.models(dd, 1)[[1]]
+summary(best_fit)
+
+```
+
+```{r}
+anova(best_fit, model_poisson, test = "Chisq")
+
+```
+
+```{r}
+pred_best_subsets_test <- predict(best_fit, newdata = test_poi, type = "response")
+
+
+actuals <- db_test$Condition
+rmse_best_subsets <- sqrt(mean((actuals - pred_best_subsets_test)^2))
+
+print(paste("RMSE Poisson best subsets:", round(rmse_best_subsets, 4)))
+```
+
+
 
 ### LASSO
 
@@ -652,32 +689,23 @@ rownames(poisson_results) <- c("Poisson Base", "Poisson Stepwise", "Poisson LASS
 print(poisson_results)
 ```
 
-
-
-# Methods
-
-# Results
-
-
-#Results
-
 ```{r}
-#| label: final_prediction
-predict_data <- read.csv("predict.csv") 
+#| label: Poisson Histogram plot with studentized residuals
+par(mfrow=c(1,2))
 
-# Predictions 
-pred_sq_final <- predict(mod_step, newdata = predict_data)
-pred_final_real <- sqrt(pmax(0, pred_sq_final)) - 0.1
+studres <- rstandard(model_poisson, type = "pearson")
 
+# Histogram
+hist(studres, breaks = 30, probability = TRUE,
+     main = "Histogram: Studentized Residuals",
+     xlab = "Studentized Residuals")
+    
+boxplot(studres, main = "Boxplot: Studentized Residuals", ylab = "Studentized Residuals")
 
-predictions <- data.frame(
-  Structure_id = predict_data$Structure_id,
-  Condition = pred_final_real
-)
-
-head(predictions)
 ```
+
+The histogram approximates a normal distribution despite the longer left tails as highlighted by the outliers in the boxplot. 
+
 
 # Conclusion
 
-# Appendix I {.unnumbered}
