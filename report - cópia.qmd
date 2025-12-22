@@ -1,0 +1,770 @@
+---
+title: Bridge condition prediction
+subtitle: An exploration in Linear Models
+author: ["Gonçalo Duarte", "Joana Ferreira", "Lucas Pegas"]
+date: today
+lang: en-US
+strip-comments: true
+df-print: paged
+  
+format:
+  html:
+    theme: cosmo
+    toc: true
+    embed-resources: true
+    code-tools:
+      toggle: false
+      source: project_template.qmd
+    code-overflow: wrap
+    highlight-style: arrow
+    smooth-scroll: true
+    lightbox: true
+    number-sections: true
+    tbl-cap-location: top
+    other-links:
+      - text: Kaggle competition
+        href: https://www.kaggle.com/competitions/parking-garage-occupancy
+---
+
+```{css}
+#| echo: FALSE
+body {
+  hyphens: auto;
+  text-align: justify;
+}
+```
+
+```{r}
+#| context: setup
+#| echo: FALSE
+
+# Load packages and set any options here
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(car)
+library(lmtest)
+theme_set(theme_linedraw(base_size = 12))
+```
+<!-- Definitions for TeX mathematical expressions -->
+:::{style="display:none"}
+$\def\bs#1{\boldsymbol{#1}}
+\def\b#1{\mathbf{#1}}}$
+:::
+
+# Introduction
+
+$$\b{y} \sim N_n \left(\b{X} \bs{\beta}, \sigma^2\b{I}\right)$$
+
+For this project we'll evaluate a dataset extracted from the US National Bridge Inspection maintained by the Federal Highways Agency, part of the US Department of Transportation.
+
+Our goals is to analyse how the covariates can explain the bridge condition and propose one or more linear rgression models to predict the response variable for the `predict.csv` dataset.
+
+## Data Set Overview
+
+| Variable | Description |
+|----------|-------------|
+| Structure_id | Identification key |
+| [Urban]{style="color: #7030A0;"} | Whether the bridge is in an urban or rural area |
+| [Year]{style="color: #7030A0;"} | The year the bridge was built |
+| [Lanes_on]{style="color: #7030A0;"} | Number of traffic lanes on the bridge |
+| [AverageDaily]{style="color: #7030A0;"} | The average daily traffic (number of vehicles) |
+| [Historic]{style="color: #7030A0;"} | Whether the bridge is historic |
+| [Material]{style="color: #7030A0;"} | The dominant material the bridge is made from |
+| [Spans]{style="color: #7030A0;"} | Number of spans of the bridge |
+| [Length]{style="color: #7030A0;"} | The length of the bridge (m) |
+| [Width]{style="color: #7030A0;"} | The width of the bridge (m) |
+| [Trucks_percent]{style="color: #7030A0;"} | The percentage of traffic made up of trucks |
+
+# Exploratory data analysis
+
+Here's the summary of the dataset.
+```{r}
+#| label: data summary
+#| fig-cap: Simple summary
+group_03 <- read.csv("group_03.csv")
+
+
+group_03$Urban <- as.factor(group_03$Urban)
+group_03$Historic <- as.factor(group_03$Historic)
+group_03$Material <- as.factor(group_03$Material)
+
+summary(group_03)
+```
+
+### Response variable
+
+Now lets take a look at the response variable to understand how it is distributed.
+
+```{r}
+#| label: Condition distribution
+#| fig-cap: Response variable distribution
+# Basic histogram with normal curve overlay
+freq_table <- table(group_03$Condition)
+prob_table <- prop.table(freq_table)
+
+# Barplot with normal overlay
+barplot(prob_table, 
+        main = "Distribution of Condition",
+        xlab = "Condition",
+        ylab = "Probability",
+        col = "lightblue",
+        border = "black")
+
+# Add normal curve overlay
+x_vals <- as.numeric(names(prob_table))
+curve(dnorm(x, mean = mean(group_03$Condition), 
+            sd = sd(group_03$Condition)), 
+      col = "red", 
+      lwd = 2, 
+      add = TRUE)
+
+legend("topleft", 
+       legend = c("Normal distribution", "Observed frequencies"),
+       col = c("red", "lightblue"), 
+       lwd = 2,
+       pch = c(NA, 15))
+```
+
+The `Condition` variable is a numerical measure of the bridge's condition, derived from the ratings attributed to the bridge dec, superstructure and foundations in the most recent inspection. The minimum value observed is 0 and the maximum obtained was 27. 
+The response variable is approximately symmetric, with its probability density centered around 20 and exhibiting close to a normal distribution, with slightly heavier tails. 
+
+```{r}
+#| label: Condition Skewness
+#| fig-cap: Response variable  skewness
+
+library(moments); 
+skewness(group_03$Condition)
+```
+
+A skewness value of -0.78 confirms mild negative skewness, meaning the response distribution is moderately skewed towards the left. The deviation is not significant and as such the response variable should be compatible with linear with linear regression as long as residuals are well-behaved.
+
+### Numerical variables
+
+Here we inspect the relationship between the numerical covariates and the bridge condition.
+
+```{r}
+#| label: Numerical variables scatterplots
+#| fig-cap: Numerical variables vs Condition
+
+
+db_num <- group_03 |> 
+  dplyr::select(Year, Lanes_on, AverageDaily, Spans, Length, Width, Trucks_percent, Condition)
+
+# scatterplots
+db_num |>
+  pivot_longer(-Condition, names_to = "Covariate", values_to = "Value") |>
+  ggplot(aes(x = Value, y = Condition)) +
+  geom_point(alpha = 0.5, size = 1) +
+  facet_wrap(~ Covariate, scales = "free_x") +
+  theme_linedraw() +
+  labs(y = "Condition (Y)", x = "Value")
+```
+
+From the scatter plots analysis, we can interpret the relationship between each numerical covariate and the bridge condition. Surprisingly, traffic and usage variables like `AverageDaily` and `Trucks_percent` do not show a strong correlation with the condition, suggesting that traffic volume alone is not a strong predictor. Similarly, physical dimensions such as `Lanes_on` and `Width` display no clear linear relationship, with data appearing heavily clustered. While `Length` and `Spans` exhibit a very weak downward trend, hinting that larger structures might be slightly associated with lower conditions, the pattern is inconclusive. In contrast, the `Year` variable presents the clearest relationship in the entire set, revealing a distinct positive trend where newer bridges tend to have higher condition scores, whereas older bridges (particularly pre-1950) display more low-condition outliers. Therefore, visual inspection strongly suggests that `Year` is the best single candidate for our initial linear model, being the only variable with a distinct linear trend against the response variable.
+
+### Pairwise correlation
+
+Now we'll go over the correlations with the response variable for all the numerical variables.
+
+```{r}
+#| label: Pairwise correlation
+#| fig-cap: Pairwise correlation with the response variable.
+
+library(corrplot)
+cor_matrix <- cor(group_03[, sapply(group_03, is.numeric)])
+
+corrplot(cor_matrix, method = "color", type = "lower", 
+         addCoef.col = "black", number.cex = 0.8,
+         tl.col = "black", tl.srt = 45, tl.cex = 0.9,
+         col = colorRampPalette(c("blue", "white", "red"))(200),
+         diag = FALSE)
+```
+
+Looking at the correlations with the response variable, `Condition`, we can see that the bridge's `Year` has a significant positive correlation with its condition, indicating older bridges are in a worse condition. We can also see that variables  `Width` and `Lanes_on` are positively correlated which makes sense as more lanes require more width. The average daily traffic is also positively correlated with the bridge width and number of lanes. Apart from this relation we can also see a negative correlation between the `Year` and `Trucks_percent` meaning that older bridges tend to have more truck traffic. This also seems plausible as newer bridges might be built in areas with more commuter trafic. 
+
+### Categorical variables
+
+```{r}
+#| label: Categorical variables
+#| fig-cap: Categorical variables 
+
+
+
+# For Urban
+ggplot(group_03, aes(x = Urban, y = Condition)) +
+  geom_boxplot(fill = "steelblue") +
+  labs(title = "Condition by Location", x = "Urban/Rural", y = "Condition")
+
+
+# For Historic
+ggplot(group_03, aes(x = factor(Historic), y = Condition)) +
+  geom_boxplot(fill = "coral") +
+  labs(title = "Condition by Historic Status", 
+       x = "Historic", y = "Condition")
+
+# For Material
+ggplot(group_03, aes(x = factor(Material), y = Condition)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(title = "Condition by Material", x = "Material", y = "Condition") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Looking at the `Urban` covariate we can see that both groups have similar medians altough the median condition of urban bridges is slightly higher. Rural bridges show substantially more variability, with more bridges in worse condition.
+
+When it comes to Historic Status we can see that Unknown shows the higher median, altough is the least common category. The `Not Historic`category also shows a high condition score with less variance than the bridges marked as `Possible`. The bridges registered as historic show the lowest median condition score with some highly degraded bridges. These scores indicate that historical status might be an informative categorical predictor.
+
+The `Condition by Material Plot` shows a similar pattern. All the materials have a median condition measure close to 20 with Concrete and "Other" displaying a slightly higher median and Steel and Timber slightly below Timber. 
+
+Concrete and Steel show more variability which makes sense as they're the more used materials by a significant margin.
+
+### Multivariate Analysis
+
+Finally, let's combine our findings. We know `Year` is the strongest numerical predictor and `Material` showed differences in the boxplots. This plot visualizes how they interact.
+
+```{r}
+#| label: Year vs Condition by Material
+#| fig-cap: Evolution of Bridge Condition over Time colored by Material
+
+ggplot(group_03, aes(x = Year, y = Condition, color = Material)) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Evolution of Bridge Condition over Time",
+       subtitle = "Colored by Bridge Material",
+       y = "Condition", x = "Year Built") +
+  theme_linedraw()
+```
+This multivariate visualization reveals a clear interaction between bridge age and material type, confirming that while `Year` is the primary driver of condition—with newer bridges consistently achieving higher ratings—`Material` plays a crucial role in this dynamic. Specifically, post-1980 bridges are predominantly `Concrete` and cluster tightly in the high-condition range (18–25), demonstrating the resilience of modern construction. In contrast, older structures (pre-1950) show significantly more variability: `Timber` bridges, though rare, appear as the most deteriorated category, often falling below a rating of 10, while `Steel` bridges show a wider spread with clear signs of aging. Interestingly, `Masonry` bridges maintain surprisingly decent conditions despite their age, reflecting the natural durability of stone. This analysis suggests that the network's high-condition inventory is driven by modern concrete structures, while low-condition outliers are primarily older steel and timber bridges, reinforcing `Year` as the strongest predictor for our linear model as it proxies for both age and material technology evolution.
+
+## The specification of linear models
+
+Lets start by defining the most basic implementation of the model, that is, including all the covariates while excluding the structure_id.
+
+```{r}
+#| label: split and first model
+
+set.seed(3185) 
+n <- nrow(group_03)
+train_idx <- sample(n, 0.8 * n)
+db_train <- group_03[train_idx, ] 
+db_test  <- group_03[-train_idx, ] 
+
+
+model1 <- lm(Condition ~ . - Structure_id + Year:Material, data = db_train)
+summary(model1)
+```
+
+From the summary we can see that model explains approximately 46.7% of the variance in bridge conditions (Adjusted R-squared = 0.467), with a residual standard error of 1.47 rating points. Overall, this first model is highly significant (p < 2.2e-16) even though it doesn't account for most of the variance.
+
+We can also see that bridge conditions deteriorate over time as older buildings have worse condition scores altough this effect varies by material with steel bridges having the clearer pattern of deterioration as they get older. Additionally, longer and wider bridges tend to have slightly better conditions, while bridges with more spans show slightly worse conditions. 
+
+
+```{r}
+#| label: residuals plot for the first model
+
+ggplot(data.frame(fitted = fitted(model1), residuals = residuals(model1)), 
+       aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  labs(x = "Fitted Values", y = "Residuals", title = "Residuals vs Fitted")
+
+```
+
+
+```{r}
+par(mfrow=c(2,2))
+plot(model1)
+
+```
+
+```{r}
+par(mfrow=c(1,2))
+
+res <- rstudent(model1)
+hist(res)
+boxplot(res)
+```
+
+The histogram of the residuals presents a normal shape with slight negative skewness, which is confirmed by the Q-Q plot, where we only see deviation in the lower values. (Box plot ??? Scale-Location??) The Residuals vs Leverage plot show no observation close to the Cook's Distance at the 0.5 level, which indicate that the outliers are not significant.
+
+## Multicollinearity (VIF) test
+
+```{r}
+library(car)
+vif(model1)
+
+```
+
+The Variance Inflation Factor (VIF) analysis reveals that there is no severe multicollinearity among the numerical predictors. Variables such as `Lanes_on` (3.68), `Width` (3.89), and `Year` (3.92) all display VIF values well below the standard thresholds of 5 or 10, justifying their retention in the model. While extremely high VIF values were observed for `Material` and the `Year`:`Material` interaction term (values around $4.28 \times 10^{15}$), this is an expected result known as structural multicollinearity. This phenomenon arises because the interaction term is mathematically dependent on the main effects, and as such, it does not indicate a statistical redundancy that requires the removal of variables.
+
+## Homocedasticity test
+
+Using the Breusch-Pagan test:
+
+```{r}
+library(lmtest)
+lmtest::bptest(model1)
+```
+Regarding the assumption of homoscedasticity, the Breusch-Pagan test yielded a p-value significantly lower than 0.05 ($p < 2.2e-16$), leading to the strong rejection of the null hypothesis. This result confirms the presence of severe heteroscedasticity, indicating that the variance of the residuals is not constant across the range of fitted values. The violation of this assumption implies that the standard errors—and consequently the significance tests—may not be entirely reliable. To address this issue and attempt to stabilize the variance, the next logical step in our analysis is to explore a transformation of the response variable using the Box-Cox method.
+
+
+```{r}
+par(mfrow=c(2,2))
+
+vars <- names(db_train)
+vars <- vars[!(vars %in% c("Structure_id", "Condition"))]
+
+for(v in vars) plot(db_train[, v], res, xlab = v)
+```
+After observing the residuals vs covariates plots, we can conclude that while the box-plots for `Rural` and `Urban` appear to have similar distributions, this variable has become statistically significant in the interaction model, suggesting a subtle real effect. The plot of `residuals` vs `Year` shows a slight curve towards recent years, which supports the curvature presented in the `Residuals` vs `Fitted` plot and identifies `Year` as a potential source of our linearity problems. Furthermore, the box-plots for `Material` reveal differences in variance, particularly with `Timber` bridges displaying more negative residuals, while the remaining plots for numerical variables present a slight funnel shape; this indicates that variance shrinks or expands as covariate values grow, which reinforces the strong rejection of the null hypothesis in the Breusch-Pagan test regarding heteroscedasticity.
+
+
+## Box-Cox Transformation
+
+```{r}
+library(MASS)
+library(car)
+
+# Ajusted Box-Cox
+model_for_bc <- update(model1, Condition + 0.1 ~ .)
+
+# Find the best Lambda
+bc <- boxcox(model_for_bc, plotit = TRUE)
+lambda <- bc$x[which.max(bc$y)]
+print(paste("Best Lambda:", round(lambda, 2)))
+
+```
+Since the response variable Condition contains zero values and the Box-Cox transformation involves logarithmic operations (which are undefined for zero), a small constant shift parameter of $0.1$ was added to the response ($Y + 0.1$). To address the severe heteroscedasticity detected in the residual analysis, we performed a Box-Cox transformation to identify an appropriate power transformation for the response variable. The resulting profile log-likelihood plot indicated an optimal $\lambda$ value of approximately 2, which suggests that a quadratic transformation is necessary to stabilize the variance. Consequently, we will proceed by defining a new model using the square of the bridge condition ($Y^2$) as the response variable to improve adherence to the linear regression assumptions.
+
+### Transformed Model
+
+```{r}
+#| label: transformed_model
+
+mod_transf <- lm(I((Condition + 0.1)^2) ~ . - Structure_id + Year:Material, data = db_train)
+
+summary(mod_transf)
+```
+
+Following the Box-Cox recommendation, we fitted a new model using the squared response variable, $(Condition + 0.1)^2$. This transformation yielded a tangible improvement in the model's explanatory power, raising the Adjusted $R^2$ from 0.467 to 0.486. 
+
+The transformation also clarified the contribution of specific predictors. The interaction between `Year` and `MaterialSteel` remains highly significant, confirming that steel structures age differently than concrete ones. However, the variable `Trucks_percent` lost its statistical significance ($p = 0.33$) in this new scale, and several interaction terms (such as those for Masonry and Timber) proved to be non-informative. These findings suggest that the current model contains unnecessary complexity, justifying the application of an automatic stepwise selection algorithm to remove redundant variables and optimize predictive performance.
+
+## Homocedasticity test
+
+```{r}
+bptest(mod_transf)
+```
+The Breusch-Pagan test still indicates the presence of heteroscedasticity ($p < 2.2e-16$), the slight reduction in the test statistic suggests a marginal improvement in variance stabilization. Given the large sample size, strictly constant variance is difficult to achieve, and this quadratic model offers a superior fit to the data compared to the linear baseline.
+
+
+```{r}
+#| label: residuals plot for the transformed model
+
+ggplot(data.frame(fitted = fitted(mod_transf), residuals = residuals(mod_transf)), 
+       aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  labs(x = "Fitted Values (Squared Condition)", 
+       y = "Residuals", 
+       title = "Residuals vs Fitted (Transformed Model)") +
+  theme_minimal()
+
+```
+To further validate the quadratic model, we analyzed the residual patterns using advanced visualization techniques. The ggplot of residuals versus fitted values shows a cloud of points centered around zero. However, the Loess smoothing line (blue) exhibits a slight curvature, particularly at the extremes of the fitted values. This suggests that while the quadratic transformation significantly improved the model fit compared to the base linear model, some minor non-linear patterns remain uncaptured.
+
+#falta interpretar!!!
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod_transf)
+par(mfrow = c(1, 1))
+```
+
+```{r}
+par(mfrow=c(1,2))
+res <- rstudent(mod_transf)
+
+hist(res, main = "Histogram of Studentized Residuals", 
+     xlab = "Residuals")
+
+boxplot(res, main = "Boxplot of Studentized Residuals", ylab = "Studentized Residuals")
+
+par(mfrow=c(1,1)) 
+```
+Additionally, the analysis of studentized residuals reveals a histogram that approximates a normal distribution, albeit with heavy tails as highlighted by the outliers in the boxplot. Despite these minor deviations, the model's low RMSE on the test set confirms that these issues do not significantly compromise its predictive power.
+
+
+### Automatic model search (Best subsets)
+
+```{r}
+#| label: find best subsets transformed model
+
+library(leaps)
+
+best <- regsubsets(I((Condition + 0.1)^2) ~ . - Structure_id + Year:Material , data = db_train, really.big = TRUE, nbest = 1,
+                   nvmax = 8)
+info <- summary(best)
+
+res <- data.frame(P = 2:9,
+                  adjR2 = info$adjr2,
+                  BIC = info$bic,
+                  `Cp-p` = abs(info$cp - 2:9))
+
+columns <- info$which[8,]
+columns[columns == TRUE]
+```
+
+
+```{r}
+#| label: print  best subsets transformed model
+mod_best <- lm(I((Condition + 0.1)^2) ~Year+Spans+Material+Historic+Year:Material,data = db_train)
+
+summary (mod_best)
+print(paste("R-squared transformed model:", summary(mod_transf)$adj.r.squared))
+print(paste("R-squared best subsets transformed model:", summary(mod_best)$adj.r.squared))
+```
+
+The best-subsets transformed model explains approximately 48.4% of the variance and displays some of the same patterns in terms of how the covariates influence the score, namely `year` and ` material`. Overall, it highly significant (p < 2.2e-16).
+Having said that it doesn't represent an improvement over the transformed model as there's a slight decrease in R-squared.
+
+```{r}
+#| label: anova_check best subsets
+
+anova(mod_best, mod_transf)
+```
+
+From the p-value of this ANOVA test we gather that the additional predictors in the transformed model provide an improvement over the best subsets model. This is also validated by the better RMSE score we obtained from the original transformed model we can see below.
+
+```{r}
+#| label: test_predictions best subsets
+
+pred_best_subsets_test <- predict(mod_best, newdata = db_test)
+
+pred_best_subsets_real <- sqrt(pmax(0, pred_best_subsets_test)) - 0.1
+
+#RMSE
+actuals <- db_test$Condition
+rmspe_score <- sqrt(mean((actuals - pred_best_subsets_real)^2))
+
+print(paste("RMSE Best subsets:", round(rmspe_score, 4)))
+```
+
+### Automatic Model Selection (Stepwise regression)
+
+```{r}
+#| label: stepwise_selection
+
+mod_step <- step(mod_transf, direction = "both", trace = 0)
+summary(mod_step)
+```
+<<<<<<< HEAD
+
+The model obtained from a Stepwise regression over the transformed model shows a modest improvement over the best subsets model in terms of R-squared, explaining 48.5% of the variance. It is also quite significant overall and displays similar patterns to previous models in terms of covariate interactions and their influence on the scores.
+
+
+=======
+>>>>>>> 1841ebf (tabelas de resumo)
+
+```{r}
+#| label: anova_check
+
+anova(mod_step, mod_transf)
+```
+The Analysis of Variance (ANOVA) performed to compare the full transformed model with the reduced model obtained via stepwise selection yielded a p-value of 0.3369. This result indicates that there is no statistically significant difference between the two models, confirming that the variable `Trucks_percent` does not contribute meaningfully to the prediction of the bridge condition. Consequently, we fail to reject the null hypothesis and select the reduced model as our final candidate, as it offers a more parsimonious solution with equivalent explanatory power (Adjusted $R^2 \approx 0.485$) while fulfilling the principle of Occam's razor.
+
+
+```{r}
+#| label: test_predictions
+
+#predict test results (db_test)
+pred_sq_test <- predict(mod_step, newdata = db_test)
+
+pred_test_real <- sqrt(pmax(0, pred_sq_test)) - 0.1
+
+#RMSE
+actuals <- db_test$Condition
+rmspe_stepwise <- sqrt(mean((actuals - pred_test_real)^2))
+
+print(paste("RMSE Stepwise:", round(rmspe_stepwise, 4)))
+```
+
+To assess the model's generalization capability, we evaluated its performance on the held-out test set (20% of the data), achieving a Root Mean Squared Error (RMSE) of 1.4595. This result demonstrates strong predictive accuracy relative to the Condition scale (0–27) and confirms that the quadratic model with interactions captures the underlying structural patterns without overfitting. Consequently, this validated model was applied to the unlabelled predict.csv dataset, reversing the Box-Cox transformation to generate the final predictions presented below.
+
+
+##LASSO
+
+```{r}
+#| label: lasso_model
+
+library(glmnet)
+
+set.seed(3185)
+X_train <- model.matrix(I((Condition + 0.1)^2) ~ . - Structure_id + Year:Material, data = db_train)[, -1]
+Y_train <- (db_train$Condition + 0.1)^2
+
+X_test <- model.matrix(Condition ~ . - Structure_id + Year:Material, data = db_test)[, -1]
+
+cv_lasso <- cv.glmnet(X_train, Y_train, alpha = 1)
+
+
+plot(cv_lasso)
+
+```
+
+```{r}
+best_lambda <- cv_lasso$lambda.1se
+
+print(paste("Best Lambda:", best_lambda))
+```
+
+```{r}
+pred_lasso_sq <- predict(cv_lasso, newx = X_test, s = best_lambda)
+pred_lasso_real <- sqrt(pmax(0, pred_lasso_sq)) - 0.1
+
+
+rmspe_lasso <- sqrt(mean((db_test$Condition - pred_lasso_real)^2))
+
+print(paste("RMSPE LASSO:", round(rmspe_lasso, 4)))
+```
+
+```{r}
+db_test_safe <- db_test
+db_test_safe$Structure_id <- db_train$Structure_id[1] 
+
+#  Adjusted R2
+adj_r2_full <- summary(mod_transf)$adj.r.squared
+adj_r2_step <- summary(mod_step)$adj.r.squared
+adj_r2_best <- summary(mod_best)$adj.r.squared
+r2_lasso <- NA
+
+# DF
+df_lin_full <- length(coef(mod_transf))
+df_lin_step <- length(coef(mod_step))
+df_lin_best <- length(coef(mod_best))
+df_lin_lasso <- sum(coef(cv_lasso, s = "lambda.1se") != 0)
+
+# Calcular RMSPE (transformed model)
+pred_full <- predict(mod_transf, newdata = db_test_safe)
+rmspe_lin_full <- sqrt(mean((db_test$Condition - (sqrt(pmax(0, pred_full)) - 0.1))^2))
+
+
+results_linear <- data.frame(
+  Method = c("Transformed Model", "Stepwise Selection", "Best Subsets", "LASSO"),
+  DF = c(df_lin_full, df_lin_step, df_lin_best, df_lin_lasso),
+  Adj_R2 = round(c(adj_r2_full, adj_r2_step, adj_r2_best, r2_lasso), 4),
+  RMSPE_Test = round(c(rmspe_lin_full, rmspe_score, rmspe_stepwise, rmspe_lasso), 4)
+)
+
+print(results_linear)
+```
+The comparative analysis of the candidate models reveals that the Transformed Full Model achieved the lowest prediction error on the test set (RMSPE: 1.4593), serving as the performance benchmark. The variable selection methods, Stepwise and Best Subsets, demonstrated excellent stability, maintaining high explanatory power ($R^2_{adj} \approx 0.48$) while reducing model complexity. Notably, the Best Subsets approach offered an efficient trade-off, achieving a near-optimal RMSPE (1.4595) with significantly fewer degrees of freedom (14) than the full model. In contrast, the LASSO regression yielded the highest error (1.4752), suggesting that its aggressive penalization excluded predictors that carried relevant signal, thereby underfitting the data compared to the OLS approaches.
+
+# Model evaluation
+
+Even after the model transformation, our diagnostics showed that the variance structure is incompatible with Gaussian assumptions. There are significant departures from normality in the Q-Q residuals test, suggesting the Gaussian error assumption is inappropriate. The Breutsch-Pagan test strongly rejects constant variance even after transformation of the response. In contrast, the Residuals vs Fitted plot indicates that the mean structure is broadly adequate, implying that the primary source of misspecification lies in the variance model rather than the linear predictor. Given the evident mean–variance dependence and the discrete, non-Gaussian nature of the response, a generalized linear model with an appropriate variance function is therefore more suitable than a homoskedastic Gaussian linear model.
+
+# Poisson Model
+
+Since the response variable is discrete, we opted to introduce a Poisson model and consider it for this dataset. We chose Poisson over Negative binomial as the response variable's variance is smaller than the mean so we aren't dealing with overdispersion, in fact our evaluations reveal underdispersion.
+
+```{r}
+#| label: fit Poisson model
+
+
+train_poi <- db_train %>% dplyr::select(-Structure_id)
+test_poi  <- db_test  %>% dplyr::select(-Structure_id)
+
+model_poisson <- glm(Condition ~ . + Year:Material, family = poisson, data = train_poi)
+
+summary(model_poisson)
+
+```
+
+After fitting the model lets examine the residuals.
+
+```{r}
+#| label: Poisson Model residuals
+
+ggplot(data.frame(fitted = fitted(model_poisson), residuals = residuals(model_poisson)), 
+       aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  labs(x = "Fitted Values", y = "Residuals", title = "Residuals vs Fitted (Poisson Model)")
+```
+
+
+The loess curve is signifcantly more horizontal than what we had in the previous models and closer to zero as opposed to the shape closer to a parabola that we got with the transformed model. This is the ideal diagnostic pattern and shows that the linear predictor is more appropriate and that the form of the mean is well captured by the model, especially when compared to the previous models.
+However, we do see some underdispersion and that the variance is not fully captured by this model, particularly for lower fitted values.
+
+```{r}
+#| label: Poisson Model dispersion ratio
+
+dispersion_ratio <- sum(residuals(model_poisson, type = "pearson")^2) / model_poisson$df.residual
+print(paste("Dispersion ratio :", dispersion_ratio))
+
+```
+
+In Poisson models we would expect to see a dispersion ratio close to one as opposed to what we see here, highlighting the underdispersion we could deduce from the residual plots, particularly for lower fitted values.
+
+```{r}
+#| label: Poisson Model Goodness fit
+
+pchisq(model_poisson$deviance, model_poisson$df.residual, lower.tail = FALSE)
+```
+
+The p value of 1 highlights the undersdispersion that we mentioned previously, as the model fits too well.
+
+
+```{r}
+#| label: Poisson Model diagnostics
+
+par(mfrow = c(2, 2))
+plot(model_poisson)
+```
+
+The diagnostics, particularly the Q-Q residuals plot confirm our previous analysis, the underdispersion of the model doesn't suit the variance pattern of the data particularly for lower fitted values.
+
+```{r}
+#| label: Poisson Histogram plot with studentized residuals
+par(mfrow=c(1,2))
+
+studres <- rstandard(model_poisson, type = "pearson")
+
+# Histogram
+hist(studres, breaks = 30, probability = TRUE,
+     main = "Histogram: Studentized Residuals",
+     xlab = "Studentized Residuals")
+    
+boxplot(studres, main = "Boxplot: Studentized Residuals", ylab = "Studentized Residuals")
+
+```
+
+
+The histogram approximates a normal distribution despite the longer left tails as highlighted by the outliers in the boxplot. 
+
+### Automatic Model Selection (Stepwise regression)
+
+```{r}
+mod_poi_step <- step(model_poisson, direction = "both", trace = 0)
+summary(mod_poi_step)
+
+```
+
+```{r}
+anova(mod_poi_step, model_poisson, test = "Chisq")
+
+```
+
+
+```{r}
+
+pred_step_poi <- predict(mod_poi_step, newdata = test_poi, type = "response")
+rmspe_step_poi <- sqrt(mean((test_poi$Condition - pred_step_poi)^2))
+
+print(paste("RMSPE Poisson Stepwise:", round(rmspe_step_poi, 4)))
+
+```
+
+### Automatic Model Selection (Best subsets)
+
+For the best subsets regression on the Poisson model we'll use `dredge` from the `MuMin` package which works with GLMs as well as opposed to `regsubsets()` which is restricted to linear regressions. 
+
+```{r}
+library(MuMIn)
+options(na.action = "na.fail")
+
+global <- glm(
+  Condition ~ . + Year:Material,   
+  family = poisson,
+  data = train_poi
+)
+
+dd <- dredge(global, fixed = "Year:Material", rank = "AIC")
+
+best_fit <- get.models(dd, 1)[[1]]
+summary(best_fit)
+
+```
+
+```{r}
+anova(best_fit, model_poisson, test = "Chisq")
+
+```
+
+```{r}
+pred_best_subsets_test <- predict(best_fit, newdata = test_poi, type = "response")
+
+
+actuals <- db_test$Condition
+rmspe_best_subsets <- sqrt(mean((actuals - pred_best_subsets_test)^2))
+
+print(paste("RMSPE Poisson best subsets:", round(rmspe_best_subsets, 4)))
+```
+
+
+
+### LASSO
+
+```{R}
+#| label: lasso_poisson_final
+
+set.seed(3185)
+
+X_train_poi <- model.matrix(Condition ~ . + Year:Material, data = train_poi)[, -1]
+Y_train_poi <- train_poi$Condition
+
+
+X_test_poi <- model.matrix(Condition ~ . + Year:Material, data = test_poi)[, -1]
+
+
+cv_lasso_poi <- cv.glmnet(X_train_poi, Y_train_poi, 
+                          family = "poisson", 
+                          alpha = 1) # alpha=1 confirma que é LASSO
+
+plot(cv_lasso_poi)
+```
+
+
+```{r}
+print(paste("Best Lambda:", cv_lasso_poi$lambda.1se))
+
+pred_lasso_poi <- predict(cv_lasso_poi, newx = X_test_poi, 
+                          s = cv_lasso_poi$lambda.1se, 
+                          type = "response")
+
+
+rmspe_lasso_poi <- sqrt(mean((test_poi$Condition - pred_lasso_poi)^2))
+
+print(paste("RMSPE LASSO Poisson:", round(rmspe_lasso_poi, 4)))
+
+```
+
+# Comparison 
+
+```{r}
+# DF
+df_poi_full <- length(coef(model_poisson))
+df_poi_step <- length(coef(mod_poi_step))
+df_poi_best <- length(coef(best_fit))
+df_poi_lasso <- sum(coef(cv_lasso_poi, s = "lambda.1se") != 0)
+
+
+pred_base_poi <- predict(model_poisson, newdata = test_poi, type = "response")
+rmspe_base_poi <- sqrt(mean((test_poi$Condition - pred_base_poi)^2))
+
+results_poisson <- data.frame(
+  Method = c("Poisson Model", "Stepwise Selection", "Best Subsets", "LASSO"),
+  DF = c(df_poi_full, df_poi_step, df_poi_best, df_poi_lasso),
+  RMSPE_Test = round(c(rmspe_base_poi, rmspe_step_poi, rmspe_best_subsets, rmspe_lasso_poi), 4)
+)
+
+print(results_poisson)
+```
+Upon evaluating the predictive performance across the Poisson-based methods, the Full Poisson Model emerged as the superior candidate, achieving the lowest Root Mean Squared Prediction Error (RMSPE) of 1.4385. Although the Stepwise and Best Subsets approaches produced competitive results (1.4388 and 1.4395, respectively), they resulted in a marginal loss of accuracy. Given that the primary objective of this study is to maximize predictive precision regarding bridge conditions, the Full Model is preferred as it retains the complete set of covariates (20 DF). This approach ensures that all potential signals and subtle partial effects are captured, avoiding the risk of information loss associated with the variable exclusion in the Stepwise method or the excessive penalization observed in the LASSO model (RMSPE: 1.4813).
+
+# Conclusion
+
