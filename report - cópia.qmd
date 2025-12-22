@@ -513,8 +513,61 @@ Even after the model transformation, our diagnostics showed that the variance st
 
 Since the response variable is discrete, we opted to introduce a Poisson model and consider it for this dataset. We chose Poisson over Negative binomial as the response variable's variance is smaller than the mean so we aren't dealing with overdispersion, in fact our evaluations reveal underdispersion.
 
+```{r}
+#| label: fit Poisson model
+
+library(glmnet)
+
+model_poisson <- glm(Condition ~ . - Structure_id, family = poisson, data = db_train)
+
+summary(model_poisson)
+```
+
+After fitting the model lets examine the residuals.
+
+```{r}
+#| label: Poisson Model residuals
+
+ggplot(data.frame(fitted = fitted(model_poisson), residuals = residuals(model_poisson)), 
+       aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  labs(x = "Fitted Values", y = "Residuals", title = "Residuals vs Fitted (Poisson Model)")
+```
 
 
+The loess curve is signifcantly more horizontal than what we had in the previous models and closer to zero as opposed to the shape closer to a parabola that we got with the transformed model. This is the ideal diagnostic pattern and shows that the linear predictor is more appropriate and that the form of the mean is well captured by the model, especially when compared to the previous models.
+However, we do see some underdispersion and that the variance is not fully captured by this model, particularly for lower fitted values.
+
+```{r}
+#| label: Poisson Model dispersion ratio
+
+dispersion_ratio <- sum(residuals(model_poisson, type = "pearson")^2) / model_poisson$df.residual
+print(paste("Dispersion ratio :", dispersion_ratio))
+
+```
+
+In Poisson models we would expect to see a dispersion ratio close to one as opposed to what we see here, highlighting the underdispersion we could deduce from the residual plots, particularly for lower fitted values.
+
+```{r}
+#| label: Poisson Model Goodness fit
+
+# Residual deviance test
+pchisq(model_poisson$deviance, model_poisson$df.residual, lower.tail = FALSE)
+```
+
+The p value of 1 highlights the undersdispersion that we mentioned previously, as the model fits too well.
+
+
+```{r}
+#| label: Poisson Model diagnostics
+
+par(mfrow = c(2, 2))
+plot(model_poisson)
+```
+
+The diagnostics, particularly the Q-Q residuals plot confirm our previous analysis, the underdispersion of the model doesn't suit the variance pattern of the data particularly for lower fitted values.
 
 
 
