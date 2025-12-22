@@ -415,6 +415,7 @@ res <- data.frame(P = 2:9,
 
 columns <- info$which[8,]
 columns[columns == TRUE]
+
 ```
 
 
@@ -460,13 +461,11 @@ print(paste("RMSE Best subsets:", round(rmspe_score, 4)))
 mod_step <- step(mod_transf, direction = "both", trace = 0)
 summary(mod_step)
 ```
-<<<<<<< HEAD
+
 
 The model obtained from a Stepwise regression over the transformed model shows a modest improvement over the best subsets model in terms of R-squared, explaining 48.5% of the variance. It is also quite significant overall and displays similar patterns to previous models in terms of covariate interactions and their influence on the scores.
 
 
-=======
->>>>>>> 1841ebf (tabelas de resumo)
 
 ```{r}
 #| label: anova_check
@@ -765,6 +764,37 @@ results_poisson <- data.frame(
 print(results_poisson)
 ```
 Upon evaluating the predictive performance across the Poisson-based methods, the Full Poisson Model emerged as the superior candidate, achieving the lowest Root Mean Squared Prediction Error (RMSPE) of 1.4385. Although the Stepwise and Best Subsets approaches produced competitive results (1.4388 and 1.4395, respectively), they resulted in a marginal loss of accuracy. Given that the primary objective of this study is to maximize predictive precision regarding bridge conditions, the Full Model is preferred as it retains the complete set of covariates (20 DF). This approach ensures that all potential signals and subtle partial effects are captured, avoiding the risk of information loss associated with the variable exclusion in the Stepwise method or the excessive penalization observed in the LASSO model (RMSPE: 1.4813).
+
+#Predictions 
+
+```{r}
+#| label: final_prediction_poisson
+
+predict_data <- read.csv("predict.csv") 
+
+
+predict_data$Urban    <- as.factor(predict_data$Urban)
+predict_data$Historic <- as.factor(predict_data$Historic)
+predict_data$Material <- as.factor(predict_data$Material)
+
+
+predict_data_clean <- predict_data %>% dplyr::select(-Structure_id)
+
+
+pred_final_poi <- predict(model_poisson, newdata = predict_data_clean, type = "response")
+
+# Final Data Frame
+predictions <- data.frame(
+  Structure_id = predict_data$Structure_id,
+  Condition = pred_final_poi
+)
+
+
+head(predictions)
+
+
+```
+
 
 # Conclusion
 
