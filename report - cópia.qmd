@@ -21,9 +21,6 @@ format:
     lightbox: true
     number-sections: true
     tbl-cap-location: top
-    other-links:
-      - text: Kaggle competition
-        href: https://www.kaggle.com/competitions/parking-garage-occupancy
 ---
 
 ```{css}
@@ -219,24 +216,8 @@ The `Condition by Material Plot` shows a similar pattern. All the materials have
 
 Concrete and Steel show more variability which makes sense as they're the more used materials by a significant margin.
 
-### Multivariate Analysis
 
-Finally, let's combine our findings. We know `Year` is the strongest numerical predictor and `Material` showed differences in the boxplots. This plot visualizes how they interact.
-
-```{r}
-#| label: Year vs Condition by Material
-#| fig-cap: Evolution of Bridge Condition over Time colored by Material
-
-ggplot(group_03, aes(x = Year, y = Condition, color = Material)) +
-  geom_point(alpha = 0.6) +
-  labs(title = "Evolution of Bridge Condition over Time",
-       subtitle = "Colored by Bridge Material",
-       y = "Condition", x = "Year Built") +
-  theme_linedraw()
-```
-This multivariate visualization reveals a clear interaction between bridge age and material type, confirming that while `Year` is the primary driver of condition—with newer bridges consistently achieving higher ratings—`Material` plays a crucial role in this dynamic. Specifically, post-1980 bridges are predominantly `Concrete` and cluster tightly in the high-condition range (18–25), demonstrating the resilience of modern construction. In contrast, older structures (pre-1950) show significantly more variability: `Timber` bridges, though rare, appear as the most deteriorated category, often falling below a rating of 10, while `Steel` bridges show a wider spread with clear signs of aging. Interestingly, `Masonry` bridges maintain surprisingly decent conditions despite their age, reflecting the natural durability of stone. This analysis suggests that the network's high-condition inventory is driven by modern concrete structures, while low-condition outliers are primarily older steel and timber bridges, reinforcing `Year` as the strongest predictor for our linear model as it proxies for both age and material technology evolution.
-
-## The specification of linear models
+# The specification of linear models
 
 Lets start by defining the most basic implementation of the model, that is, including all the covariates while excluding the structure_id.
 
@@ -288,7 +269,7 @@ boxplot(res)
 
 The histogram of the residuals presents a normal shape with slight negative skewness, which is confirmed by the Q-Q plot, where we only see deviation in the lower values. (Box plot ??? Scale-Location??) The Residuals vs Leverage plot show no observation close to the Cook's Distance at the 0.5 level, which indicate that the outliers are not significant.
 
-## Multicollinearity (VIF) test
+### Multicollinearity (VIF) test
 
 ```{r}
 library(car)
@@ -298,7 +279,7 @@ vif(model1)
 
 The Variance Inflation Factor (VIF) analysis reveals that there is no severe multicollinearity among the numerical predictors. Variables such as `Lanes_on` (3.68), `Width` (3.89), and `Year` (3.92) all display VIF values well below the standard thresholds of 5 or 10, justifying their retention in the model. While extremely high VIF values were observed for `Material` and the `Year`:`Material` interaction term (values around $4.28 \times 10^{15}$), this is an expected result known as structural multicollinearity. This phenomenon arises because the interaction term is mathematically dependent on the main effects, and as such, it does not indicate a statistical redundancy that requires the removal of variables.
 
-## Homocedasticity test
+### Homocedasticity test
 
 Using the Breusch-Pagan test:
 
@@ -309,18 +290,8 @@ lmtest::bptest(model1)
 Regarding the assumption of homoscedasticity, the Breusch-Pagan test yielded a p-value significantly lower than 0.05 ($p < 2.2e-16$), leading to the strong rejection of the null hypothesis. This result confirms the presence of severe heteroscedasticity, indicating that the variance of the residuals is not constant across the range of fitted values. The violation of this assumption implies that the standard errors—and consequently the significance tests—may not be entirely reliable. To address this issue and attempt to stabilize the variance, the next logical step in our analysis is to explore a transformation of the response variable using the Box-Cox method.
 
 
-```{r}
-par(mfrow=c(2,2))
 
-vars <- names(db_train)
-vars <- vars[!(vars %in% c("Structure_id", "Condition"))]
-
-for(v in vars) plot(db_train[, v], res, xlab = v)
-```
-After observing the residuals vs covariates plots, we can conclude that while the box-plots for `Rural` and `Urban` appear to have similar distributions, this variable has become statistically significant in the interaction model, suggesting a subtle real effect. The plot of `residuals` vs `Year` shows a slight curve towards recent years, which supports the curvature presented in the `Residuals` vs `Fitted` plot and identifies `Year` as a potential source of our linearity problems. Furthermore, the box-plots for `Material` reveal differences in variance, particularly with `Timber` bridges displaying more negative residuals, while the remaining plots for numerical variables present a slight funnel shape; this indicates that variance shrinks or expands as covariate values grow, which reinforces the strong rejection of the null hypothesis in the Breusch-Pagan test regarding heteroscedasticity.
-
-
-## Box-Cox Transformation
+### Box-Cox Transformation
 
 ```{r}
 library(MASS)
@@ -337,7 +308,7 @@ print(paste("Best Lambda:", round(lambda, 2)))
 ```
 Since the response variable Condition contains zero values and the Box-Cox transformation involves logarithmic operations (which are undefined for zero), a small constant shift parameter of $0.1$ was added to the response ($Y + 0.1$). To address the severe heteroscedasticity detected in the residual analysis, we performed a Box-Cox transformation to identify an appropriate power transformation for the response variable. The resulting profile log-likelihood plot indicated an optimal $\lambda$ value of approximately 2, which suggests that a quadratic transformation is necessary to stabilize the variance. Consequently, we will proceed by defining a new model using the square of the bridge condition ($Y^2$) as the response variable to improve adherence to the linear regression assumptions.
 
-### Transformed Model
+# Transformed Model
 
 ```{r}
 #| label: transformed_model
@@ -351,7 +322,7 @@ Following the Box-Cox recommendation, we fitted a new model using the squared re
 
 The transformation also clarified the contribution of specific predictors. The interaction between `Year` and `MaterialSteel` remains highly significant, confirming that steel structures age differently than concrete ones. However, the variable `Trucks_percent` lost its statistical significance ($p = 0.33$) in this new scale, and several interaction terms (such as those for Masonry and Timber) proved to be non-informative. These findings suggest that the current model contains unnecessary complexity, justifying the application of an automatic stepwise selection algorithm to remove redundant variables and optimize predictive performance.
 
-## Homocedasticity test
+### Homocedasticity test
 
 ```{r}
 bptest(mod_transf)
@@ -375,7 +346,6 @@ ggplot(data.frame(fitted = fitted(mod_transf), residuals = residuals(mod_transf)
 ```
 To further validate the quadratic model, we analyzed the residual patterns using advanced visualization techniques. The ggplot of residuals versus fitted values shows a cloud of points centered around zero. However, the Loess smoothing line (blue) exhibits a slight curvature, particularly at the extremes of the fitted values. This suggests that while the quadratic transformation significantly improved the model fit compared to the base linear model, some minor non-linear patterns remain uncaptured.
 
-#falta interpretar!!!
 
 ```{r}
 par(mfrow = c(2, 2))
@@ -397,7 +367,7 @@ par(mfrow=c(1,1))
 Additionally, the analysis of studentized residuals reveals a histogram that approximates a normal distribution, albeit with heavy tails as highlighted by the outliers in the boxplot. Despite these minor deviations, the model's low RMSE on the test set confirms that these issues do not significantly compromise its predictive power.
 
 
-### Automatic model search (Best subsets)
+## Automatic model search (Best subsets)
 
 ```{r}
 #| label: find best subsets transformed model
@@ -437,7 +407,7 @@ Having said that it doesn't represent an improvement over the transformed model 
 anova(mod_best, mod_transf)
 ```
 
-From the p-value of this ANOVA test we gather that the additional predictors in the transformed model provide an improvement over the best subsets model. This is also validated by the better RMSE score we obtained from the original transformed model we can see below.
+From the p-value of this ANOVA test we gather that the additional predictors in the transformed model provide an improvement over the best subsets model. This is also validated by the better RMSPE score we obtained from the original transformed model we can see below.
 
 ```{r}
 #| label: test_predictions best subsets
@@ -453,7 +423,7 @@ rmspe_score <- sqrt(mean((actuals - pred_best_subsets_real)^2))
 print(paste("RMSE Best subsets:", round(rmspe_score, 4)))
 ```
 
-### Automatic Model Selection (Stepwise regression)
+## Automatic Model Selection (Stepwise regression)
 
 ```{r}
 #| label: stepwise_selection
@@ -492,7 +462,6 @@ print(paste("RMSE Stepwise:", round(rmspe_stepwise, 4)))
 
 To assess the model's generalization capability, we evaluated its performance on the held-out test set (20% of the data), achieving a Root Mean Squared Error (RMSE) of 1.4595. This result demonstrates strong predictive accuracy relative to the Condition scale (0–27) and confirms that the quadratic model with interactions captures the underlying structural patterns without overfitting. Consequently, this validated model was applied to the unlabelled predict.csv dataset, reversing the Box-Cox transformation to generate the final predictions presented below.
 
-
 ##LASSO
 
 ```{r}
@@ -528,6 +497,8 @@ rmspe_lasso <- sqrt(mean((db_test$Condition - pred_lasso_real)^2))
 
 print(paste("RMSPE LASSO:", round(rmspe_lasso, 4)))
 ```
+
+## Transformed Model conclusions
 
 ```{r}
 db_test_safe <- db_test
@@ -742,7 +713,7 @@ print(paste("RMSPE LASSO Poisson:", round(rmspe_lasso_poi, 4)))
 
 ```
 
-# Comparison 
+## Poisson Model Conclusions
 
 ```{r}
 # DF
@@ -795,6 +766,41 @@ head(predictions)
 
 ```
 
-
 # Conclusion
+
+The main goal of this project was to study the dataset and understand how to model the data in a way that allowed us to explain how they influenced the Bridge condition. Over the report we evaluated multiple regression approaches to predicting bridge condition ratings, progressing from classical linear regress through Box-Cox transformations to generalized linear models.
+
+We started with the basic model and understood that there limitations in the way it modeled both the mean and the variance of the dataset. 
+To address this we opted by a transformed model with improved results while still suffering from specification issues. . The Breusch-Pagan test consistently rejected homoscedasticity (p < 2.2e-16) even after transformation, and residual diagnostics revealed persistent heteroscedasticity and non-normality, particularly in the tails of the distribution.
+
+Our comparative analysis demonstrates that the Poisson regression model provides the most appropriate statistical framework for this prediction task, achieving a RMSPE of 1.4385 on our test set and outperforming all linear model variants and further tranformations of the Poisson Model.
+
+Across all the modelling approaches considered, a few consistent patterns emerged: 
+
+
+- **Year** emerged as the single strongest predictor, with newer bridges exhibiting significantly better condition scores
+- **Material type** plays a crucial role, particularly through its interaction with Year—steel bridges show pronounced age-related deterioration patterns
+- **Structural characteristics** (Spans, Length, Width) contribute meaningful but secondary effects
+- **Traffic variables** (AverageDaily, Trucks_percent) showed surprisingly weak associations with condition, becoming non-significant in reduced models
+
+### Model Specification 
+
+The diagnostic evaluation revealed critical insights about model appropriateness:
+
+1. **Variance Structure**: The Poisson model's residuals vs. fitted plot showed a substantially flatter LOESS curve compared to linear models, indicating proper mean structure specification. However, the dispersion ratio of 0.109 revealed significant **underdispersion**, suggesting the variance decreases faster than the Poisson assumption (Var(Y) = μ) would predict.
+
+2. **Linearity**: The curvature observed in transformed linear model diagnostics confirmed that the Gaussian assumption was fundamentally incompatible with this discrete response variable, even after Box-Cox transformations.
+
+3. **Parsimony**: Variable selection methods (Stepwise, Best Subsets, LASSO) achieved competitive performance with fewer parameters, but the full Poisson model was retained as it maximized predictive accuracy, the main objective of this analysis, with an acceptable trade-off in model complexity (20 parameters).
+
+Despite the Poisson model's superior performance, the detected underdispersion (dispersion ratio ≈ 0.11) indicates opportunities for improvement.
+
+
+### Final Recommendation
+
+For operational bridge condition prediction in this dataset, we recommend the **full Poisson regression model** including all covariates and the Year:Material interaction. This model achieved:
+
+- **RMSPE**: 1.4385 (equivalent to ±1.44 rating points on a 0-27 scale)
+- **Interpretability**: Clear, exponential relationships between predictors and expected condition
+- **Diagnostic Performance**: Appropriate mean structure with manageable variance deviations
 
