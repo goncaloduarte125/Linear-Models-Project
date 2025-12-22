@@ -403,6 +403,8 @@ In `R`, models are specified in a compact symbolic form. From the documentation:
 ### Automatic model search:
 
 ###Best subsets
+
+
 ### Automatic Model Selection (Stepwise regression)
 
 ```{r}
@@ -442,7 +444,7 @@ pred_test_real <- sqrt(pmax(0, pred_sq_test)) - 0.1
 actuals <- db_test$Condition
 rmse_score <- sqrt(mean((actuals - pred_test_real)^2))
 
-print(paste("RMSE:", round(rmse_score, 4)))
+print(paste("RMSE Stepwise:", round(rmse_score, 4)))
 ```
 
 To assess the model's generalization capability, we evaluated its performance on the held-out test set (20% of the data), achieving a Root Mean Squared Error (RMSE) of 1.4595. This result demonstrates strong predictive accuracy relative to the Condition scale (0–27) and confirms that the quadratic model with interactions captures the underlying structural patterns without overfitting. Consequently, this validated model was applied to the unlabelled predict.csv dataset, reversing the Box-Cox transformation to generate the final predictions presented below.
@@ -481,28 +483,10 @@ pred_lasso_real <- sqrt(pmax(0, pred_lasso_sq)) - 0.1
 
 rmse_lasso <- sqrt(mean((db_test$Condition - pred_lasso_real)^2))
 
-print(paste("RMSPE Stepwise:", round(rmse_score, 4)))
 print(paste("RMSPE LASSO:", round(rmse_lasso, 4)))
 ```
 
-#Results
 
-```{r}
-#| label: final_prediction
-predict_data <- read.csv("predict.csv") 
-
-# Predictions 
-pred_sq_final <- predict(mod_step, newdata = predict_data)
-pred_final_real <- sqrt(pmax(0, pred_sq_final)) - 0.1
-
-
-predictions <- data.frame(
-  Structure_id = predict_data$Structure_id,
-  Condition = pred_final_real
-)
-
-head(predictions)
-```
 
 # Model evaluation
 
@@ -510,17 +494,19 @@ Even after the model transformation, our diagnostics showed that the variance st
 
 # Poisson Model
 
-
 Since the response variable is discrete, we opted to introduce a Poisson model and consider it for this dataset. We chose Poisson over Negative binomial as the response variable's variance is smaller than the mean so we aren't dealing with overdispersion, in fact our evaluations reveal underdispersion.
 
 ```{r}
 #| label: fit Poisson model
 
-library(glmnet)
 
-model_poisson <- glm(Condition ~ . - Structure_id, family = poisson, data = db_train)
+train_poi <- db_train %>% dplyr::select(-Structure_id)
+test_poi  <- db_test  %>% dplyr::select(-Structure_id)
+
+model_poisson <- glm(Condition ~ . + Year:Material, family = poisson, data = train_poi)
 
 summary(model_poisson)
+
 ```
 
 After fitting the model lets examine the residuals.
@@ -570,10 +556,127 @@ plot(model_poisson)
 The diagnostics, particularly the Q-Q residuals plot confirm our previous analysis, the underdispersion of the model doesn't suit the variance pattern of the data particularly for lower fitted values.
 
 
+#####
+
+
+```{r}
+pred_base_poi <- predict(model_poisson, newdata = test_poi, type = "response")
+rmse_base_poi <- sqrt(mean((test_poi$Condition - pred_base_poi)^2))
+
+print(paste("RMSE Poisson Base:", round(rmse_base_poi, 4)))
+
+```
+
+
+### Automatic Model Selection (Stepwise regression)
+
+```{r}
+mod_poi_step <- step(model_poisson, direction = "both", trace = 0)
+summary(mod_poi_step)
+
+```
+
+```{r}
+anova(mod_poi_step, model_poisson, test = "Chisq")
+
+```
+
+
+```{r}
+
+pred_step_poi <- predict(mod_poi_step, newdata = test_poi, type = "response")
+rmse_step_poi <- sqrt(mean((test_poi$Condition - pred_step_poi)^2))
+
+print(paste("RMSE Poisson Stepwise:", round(rmse_step_poi, 4)))
+
+```
+
+### LASSO
+
+```{R}
+#| label: lasso_poisson_final
+
+set.seed(3185)
+
+X_train_poi <- model.matrix(Condition ~ . + Year:Material, data = train_poi)[, -1]
+Y_train_poi <- train_poi$Condition
+
+
+X_test_poi <- model.matrix(Condition ~ . + Year:Material, data = test_poi)[, -1]
+
+
+cv_lasso_poi <- cv.glmnet(X_train_poi, Y_train_poi, 
+                          family = "poisson", 
+                          alpha = 1) # alpha=1 confirma que é LASSO
+
+plot(cv_lasso_poi)
+```
+
+
+```{r}
+pred_lasso_poi <- predict(cv_lasso_poi, newx = X_test_poi, 
+                          s = cv_lasso_poi$lambda.1se, 
+                          type = "response")
+
+
+rmse_lasso_poi <- sqrt(mean((test_poi$Condition - pred_lasso_poi)^2))
+
+print(paste("RMSE LASSO Poisson:", round(rmse_lasso_poi, 4)))
+
+```
+
+# Comparation 
+
+```{r}
+#| label: poisson_results_table
+
+
+df_base <- length(coef(model_poisson))
+df_step <- length(coef(mod_poi_step))
+
+
+coef_lasso <- coef(cv_lasso_poi, s = "lambda.1se")
+df_lasso <- sum(coef_lasso != 0)
+
+
+rmse_vals <- c(rmse_base_poi, rmse_step_poi, rmse_lasso_poi)
+
+
+poisson_results <- data.frame(
+  df = c(df_base, df_step, df_lasso),
+  rmspe = round(rmse_vals, 4)
+)
+
+
+rownames(poisson_results) <- c("Poisson Base", "Poisson Stepwise", "Poisson LASSO")
+print(poisson_results)
+```
+
+
 
 # Methods
 
 # Results
+
+
+#Results
+
+```{r}
+#| label: final_prediction
+predict_data <- read.csv("predict.csv") 
+
+# Predictions 
+pred_sq_final <- predict(mod_step, newdata = predict_data)
+pred_final_real <- sqrt(pmax(0, pred_sq_final)) - 0.1
+
+
+predictions <- data.frame(
+  Structure_id = predict_data$Structure_id,
+  Condition = pred_final_real
+)
+
+head(predictions)
+```
 
 # Conclusion
 
