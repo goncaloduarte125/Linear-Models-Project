@@ -404,6 +404,56 @@ In `R`, models are specified in a compact symbolic form. From the documentation:
 
 ### Best subsets
 
+```{r}
+#| label: find best subsets transformed model
+
+library(leaps)
+
+best <- regsubsets(I((Condition + 0.1)^2) ~ . - Structure_id + Year:Material , data = db_train, really.big = TRUE, nbest = 1,
+                   nvmax = 8)
+info <- summary(best)
+plot(2:9, info$cp, xlab = 'P (# of predictors + 1)', ylab = 'Cp')
+abline(a = 0, b = 1, col = "blue")
+
+res <- data.frame(P = 2:9,
+                  adjR2 = info$adjr2,
+                  BIC = info$bic,
+                  `Cp-p` = abs(info$cp - 2:9))
+
+columns <- info$which[8,]
+columns[columns == TRUE]
+```
+
+
+```{r}
+#| label: print  best subsets transformed model
+mod_best <- lm(I((Condition + 0.1)^2) ~Year+Spans+Material+Historic+Year:Material,data = db_train)
+
+summary (mod_best)
+print(paste("R2 transformed model:", summary(mod_transf)$adj.r.squared))
+print(paste("R2 best subsets transformed model:", summary(mod_best)$adj.r.squared))
+```
+
+```{r}
+#| label: anova_check best subsets
+
+anova(mod_best, mod_transf)
+```
+
+```{r}
+#| label: test_predictions best subsets
+
+pred_best_subsets_test <- predict(mod_best, newdata = db_test)
+
+pred_best_subsets_real <- sqrt(pmax(0, pred_best_subsets_test)) - 0.1
+
+#RMSE
+actuals <- db_test$Condition
+rmse_score <- sqrt(mean((actuals - pred_best_subsets_real)^2))
+
+print(paste("RMSE Best subsets:", round(rmse_score, 4)))
+```
+
 
 ### Automatic Model Selection (Stepwise regression)
 
